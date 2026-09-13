@@ -66,8 +66,11 @@ cp .env.example .env      # then fill in keys
 
 Set in `.env`:
 
-- `GROQ_API_KEY` — required; the agent runs on `groq:llama-3.3-70b-versatile`
-  (free tier via [console.groq.com](https://console.groq.com)).
+- `GROQ_API_KEY` — required; the agent runs on `groq:openai/gpt-oss-120b`
+  (free tier via [console.groq.com](https://console.groq.com)). Groq's model
+  lineup changes over time — if this 404s, run
+  `curl https://api.groq.com/openai/v1/models -H "Authorization: Bearer $GROQ_API_KEY"`
+  and swap `MODEL` in `graph.py` for one whose `supported_features` includes `"tools"`.
 - `OPENAI_API_KEY` — required for the **voice bot** (speech-to-text and
   text-to-speech run on OpenAI).
 - `LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY` — optional, to see the

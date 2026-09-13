@@ -27,8 +27,11 @@ from typing_extensions import NotRequired
 
 from . import prompts, tools
 
-# Groq's free tier is plenty for this demo's tool-calling needs.
-MODEL = "groq:llama-3.3-70b-versatile"
+# Groq's free tier is plenty for this demo's tool-calling needs. Groq's model
+# lineup changes over time — if this 404s, check what your account can see:
+#   curl https://api.groq.com/openai/v1/models -H "Authorization: Bearer $GROQ_API_KEY"
+# and pick one whose supported_features includes "tools".
+MODEL = "groq:openai/gpt-oss-120b"
 
 
 class GymSupportState(AgentState):
