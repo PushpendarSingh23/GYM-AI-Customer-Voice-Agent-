@@ -20,7 +20,7 @@ Run it (opens a browser client via Pipecat's dev runner):
     uv run python -m gym_support.voice
 
 Needs ``OPENAI_API_KEY`` (STT + TTS) in ``.env``, plus the agent's model key
-(``ANTHROPIC_API_KEY`` by default).
+(``GROQ_API_KEY``).
 """
 
 from __future__ import annotations
@@ -70,7 +70,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 
     # --- LLM: our LangGraph runs as the brain (see langgraph_llm_service.py) -
     # No api_key here: this service makes no provider API calls of its own —
-    # the graph does its own model calls (ANTHROPIC_API_KEY, read in graph.py).
+    # the graph does its own model calls (GROQ_API_KEY, read in graph.py).
     llm = LangGraphLLMService(graph=build_graph())
 
     # --- Speech out ----------------------------------------------------------

@@ -27,7 +27,8 @@ from typing_extensions import NotRequired
 
 from . import prompts, tools
 
-MODEL = "anthropic:claude-sonnet-4-6"
+# Groq's free tier is plenty for this demo's tool-calling needs.
+MODEL = "groq:llama-3.3-70b-versatile"
 
 
 class GymSupportState(AgentState):

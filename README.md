@@ -66,7 +66,8 @@ cp .env.example .env      # then fill in keys
 
 Set in `.env`:
 
-- `ANTHROPIC_API_KEY` — required; the agent runs on `anthropic:claude-sonnet-4-6`.
+- `GROQ_API_KEY` — required; the agent runs on `groq:llama-3.3-70b-versatile`
+  (free tier via [console.groq.com](https://console.groq.com)).
 - `OPENAI_API_KEY` — required for the **voice bot** (speech-to-text and
   text-to-speech run on OpenAI).
 - `LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY` — optional, to see the
@@ -130,7 +131,7 @@ current prompt has no "hand off to a human" option, so this documents a real
 gap rather than asserting behavior that doesn't exist — worth reading before
 extending the prompts.
 
-Requires `ANTHROPIC_API_KEY` — this calls the real model, not a mock.
+Requires `GROQ_API_KEY` — this calls the real model, not a mock.
 
 ## What you see in LangSmith
 

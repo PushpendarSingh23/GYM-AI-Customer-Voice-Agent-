@@ -10,7 +10,7 @@ This is deliberately small and readable rather than a general eval framework
 build eval infrastructure for its own sake.
 
 Run: uv run python -m gym_support.eval
-Requires ANTHROPIC_API_KEY — this calls the real model, not a mock.
+Requires GROQ_API_KEY — this calls the real model, not a mock.
 """
 
 from __future__ import annotations
