@@ -14,11 +14,11 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "pipecat-ai[openai,silero,tracing,webrtc]>=1.4.0",
     "pipecat-ai-prebuilt>=1.0.2",
-    "opentelemetry-exporter-otlp-proto-http>=1.42.1",
 ]
 
 [project.scripts]
 pipecat-langgraph-example = "gym_support.server:main"
+gym-support-eval = "gym_support.eval:main"
 
 [build-system]
 requires = ["hatchling"]

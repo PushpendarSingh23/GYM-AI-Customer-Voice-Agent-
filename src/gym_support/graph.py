@@ -18,8 +18,6 @@ Handoff tools (in ``tools.py``) move control between these nodes via
 
 from __future__ import annotations
 
-import os
-
 from langchain.agents import AgentState, create_agent
 from langchain.chat_models import init_chat_model
 from langchain.messages import AIMessage
@@ -29,7 +27,7 @@ from typing_extensions import NotRequired
 
 from . import prompts, tools
 
-DEFAULT_MODEL = "anthropic:claude-sonnet-4-6"
+MODEL = "anthropic:claude-sonnet-4-6"
 
 
 class GymSupportState(AgentState):
@@ -39,7 +37,7 @@ class GymSupportState(AgentState):
 
 
 def _build_agents():
-    model = init_chat_model(os.getenv("GYM_SUPPORT_MODEL", DEFAULT_MODEL))
+    model = init_chat_model(MODEL)
 
     triage_agent = create_agent(
         model,

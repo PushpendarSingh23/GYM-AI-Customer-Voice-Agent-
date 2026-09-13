@@ -9,18 +9,18 @@ The ``LLM`` stage is ``LangGraphLLMService``: it runs our whole graph as the
 brain, so going voice doesn't change the agent — it wraps it. The rest of the
 pipeline (transport, STT, TTS, Silero VAD, context aggregators) is stock Pipecat.
 
-Also wired up:
-  * **LangSmith tracing** — Pipecat's OTel spans (turn/stt/llm/tts) bridged to
-    LangSmith, with the graph's nodes nested under the ``llm`` span.
-  * **Conversation recording** — the whole session captured as a stereo WAV
-    (user left / bot right) and attached to the LangSmith root span.
+Also wired up: **conversation recording** — the whole session captured as a
+stereo WAV (user left / bot right) and saved to disk for later review. The
+graph's own model/tool calls are traced to LangSmith automatically via the
+``LANGSMITH_TRACING`` env var (see ``graph.py`` / ``.env.example``) — no
+custom tracing plumbing needed here.
 
 Run it (opens a browser client via Pipecat's dev runner):
 
     uv run python -m gym_support.voice
 
 Needs ``OPENAI_API_KEY`` (STT + TTS) in ``.env``, plus the agent's model key
-(``ANTHROPIC_API_KEY`` by default) and the LangSmith / OTEL vars for tracing.
+(``ANTHROPIC_API_KEY`` by default).
 """
 
 from __future__ import annotations
@@ -52,7 +52,6 @@ from pipecat.workers.runner import WorkerRunner
 
 from .langgraph_llm_service import LangGraphLLMService
 from .graph import build_graph
-from .processor import setup_langsmith_tracing
 
 load_dotenv(override=True)
 
@@ -62,26 +61,17 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 
     conversation_id = str(uuid.uuid4())
 
-    tracing_processor = setup_langsmith_tracing(
-        llm_span_kind="chain",
-        thread_id_provider=lambda: conversation_id,
-    )
-
-    # Record the whole conversation as a stereo WAV (user left / bot right) and
-    # register the path so the LangSmith root span gets the audio attached.
+    # Record the whole conversation as a stereo WAV (user left / bot right).
     recording_path = os.path.join(tempfile.gettempdir(), f"langgym-{conversation_id}.wav")
     audiobuffer = AudioBufferProcessor(num_channels=2)
-    tracing_processor.register_recording(conversation_id, recording_path)
 
     # --- Speech in -----------------------------------------------------------
     stt = OpenAISTTService(api_key=os.getenv("OPENAI_API_KEY"))
 
     # --- LLM: our LangGraph runs as the brain (see langgraph_llm_service.py) -
-    llm = LangGraphLLMService(
-        api_key=os.getenv("OPENAI_API_KEY"),
-        graph=build_graph(),
-    )
-
+    # No api_key here: this service makes no provider API calls of its own —
+    # the graph does its own model calls (ANTHROPIC_API_KEY, read in graph.py).
+    llm = LangGraphLLMService(graph=build_graph())
 
     # --- Speech out ----------------------------------------------------------
     tts = OpenAITTSService(
@@ -115,8 +105,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
         pipeline,
         params=PipelineParams(enable_metrics=True, enable_usage_metrics=True),
         idle_timeout_secs=runner_args.pipeline_idle_timeout_secs,
-        enable_tracing=True,             # emit conversation/turn/stt/llm/tts spans
-        conversation_id=conversation_id,  # root span id == the LangSmith thread
     )
 
     @transport.event_handler("on_client_connected")
@@ -136,8 +124,7 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
 
     @audiobuffer.event_handler("on_audio_data")
     async def on_audio_data(buffer, audio, sample_rate, num_channels):  # noqa: ANN001
-        # Fires once on stop_recording(): write the merged stereo WAV to the path
-        # the tracing processor reads and attaches to the conversation span.
+        # Fires once on stop_recording(): write the merged stereo WAV to disk.
         with wave.open(recording_path, "wb") as wf:
             wf.setnchannels(num_channels)
             wf.setsampwidth(2)  # PCM16
@@ -148,8 +135,6 @@ async def run_bot(transport: BaseTransport, runner_args: RunnerArguments) -> Non
     @transport.event_handler("on_client_disconnected")
     async def on_client_disconnected(transport, client):  # noqa: ANN001
         logger.info("Client disconnected")
-        # Stop first so the WAV is written before the conversation span ends and
-        # the tracing processor reads it.
         await audiobuffer.stop_recording()
         await worker.cancel()
 

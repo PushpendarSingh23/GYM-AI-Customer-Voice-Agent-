@@ -1,38 +1,25 @@
 """A Pipecat LLM service whose "brain" is an in-process LangGraph graph.
 
-This is the adapter you drop into ``voice.py`` at the swap point: it replaces the
-stock ``OpenAILLMService`` so our gym support graph becomes the LLM stage of the
-voice pipeline. Lifted from ``langchain-ai/voice-demo``
-(``src/voice_demo/pipecat/langgraph_llm_service.py``) and lightly annotated for
-this repo.
+This is the adapter you drop into ``voice.py`` at the swap point: it plugs our
+gym support graph in as the LLM stage of the voice pipeline, in place of a
+stock provider service (``AnthropicLLMService``, ``OpenAILLMService``, ...).
 
-Why this and not Pipecat's ``LangchainProcessor``: ``LangchainProcessor`` is a
-plain ``FrameProcessor``, so it produces no ``llm`` span — there'd be nothing for
-the graph's spans to nest under. By instead **subclassing ``OpenAILLMService``
-and overriding its ``@traced_llm``-decorated ``_process_context``**, the graph
-runs *inside* Pipecat's ``llm`` span. With ``LANGSMITH_TRACING_MODE=otel``,
-LangChain/LangGraph emit their runs as OTel spans through the shared provider, so
-every node becomes a **subspan of that ``llm`` span**, in one trace:
-
-    turn
-    └── llm                  (this service — only orchestrates the graph)
-        ├── triage           (handoff decision)
-        ├── credits          (model + check_credits tool)
-        └── ...              (final answer — spoken)
-
-NB: this makes no OpenAI API call of its own — the parent's client stays unused;
-we only inherit its ``llm`` span, metrics, and frame plumbing.
+It subclasses Pipecat's generic ``LLMService`` — the same base every provider
+service (Anthropic, OpenAI, ...) subclasses — and follows the same convention
+they do: react to ``LLMContextFrame`` by calling ``_process_context``,
+decorated with Pipecat's own ``@traced_llm`` so the run gets a proper ``llm``
+span. No provider HTTP client is involved; the graph itself does the model
+calls (see ``graph.py``), so this service makes no API calls of its own.
 
 ────────────────────────────────────────────────────────────────────────────
-USAGE / REQUIREMENTS for this repo (read before wiring into ``voice.py``):
+USAGE / REQUIREMENTS for this repo:
 
 1. **Pass a STATELESS graph.** This adapter calls ``astream_events`` with no
    ``thread_id`` — Pipecat's ``LLMContext`` is the single source of truth (keeps
    barge-in correct). So ``build_graph()`` must compile **without** a
    checkpointer, and ``active_agent`` must be derived from the message history
-   rather than persisted (see the transcript-derivation approach we discussed).
-   A graph compiled with ``InMemorySaver`` will raise because it expects a
-   ``thread_id``.
+   rather than persisted. A graph compiled with ``InMemorySaver`` will raise
+   because it expects a ``thread_id``.
 
 2. **Check ``_SPOKEN_NODES``.** Only token deltas from these graph nodes are
    spoken. LangChain's ``create_agent`` names its model node ``model``, and that
@@ -53,9 +40,16 @@ from langchain_core.messages import (
     convert_to_messages,
     convert_to_openai_messages,
 )
-from pipecat.frames.frames import LLMTextFrame
+from pipecat.frames.frames import (
+    Frame,
+    LLMContextFrame,
+    LLMFullResponseEndFrame,
+    LLMFullResponseStartFrame,
+    LLMTextFrame,
+)
 from pipecat.processors.aggregators.llm_context import LLMContext
-from pipecat.services.openai.llm import OpenAILLMService
+from pipecat.processors.frame_processor import FrameDirection
+from pipecat.services.llm_service import LLMService
 from pipecat.utils.tracing.service_decorators import traced_llm
 
 # Graph nodes whose streamed tokens are the user-facing answer (so they're
@@ -116,14 +110,21 @@ def _tool_exchange(input_messages: list, final_messages: list) -> list:
     ]
 
 
-class LangGraphLLMService(OpenAILLMService):
+class LangGraphLLMService(LLMService):
     """Runs a compiled LangGraph graph as the Pipecat LLM stage."""
 
     def __init__(self, *, graph: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self._graph = graph
 
-    @traced_llm  # re-applied so the `llm` span wraps the graph run (and nests it)
+    async def process_frame(self, frame: Frame, direction: FrameDirection) -> None:
+        await super().process_frame(frame, direction)
+        if isinstance(frame, LLMContextFrame):
+            await self._process_context(frame.context)
+        else:
+            await self.push_frame(frame, direction)
+
+    @traced_llm
     async def _process_context(self, context: LLMContext) -> None:
         # Pipecat's context is OpenAI-format dicts; convert to LangChain
         # messages, dropping system messages — the graph owns its own prompt.
@@ -131,20 +132,27 @@ class LangGraphLLMService(OpenAILLMService):
             [m for m in context.get_messages() if m.get("role") != "system"]
         )
 
-        await self.start_ttfb_metrics()
-        first_token = True
-        final_messages: list | None = None
-        async for event in self._graph.astream_events({"messages": messages}, version="v2"):
-            if event.get("event") == "on_chain_end":
-                final_messages = _final_state(event, final_messages)
-            elif text := _spoken_text(event):
-                if first_token:
-                    await self.stop_ttfb_metrics()
-                    first_token = False
-                await self.push_frame(LLMTextFrame(text))
+        try:
+            await self.push_frame(LLMFullResponseStartFrame())
+            await self.start_processing_metrics()
+            await self.start_ttfb_metrics()
 
-        # Persist the tool-call exchange so the model sees it next turn.
-        if final_messages is not None:
-            to_persist = _tool_exchange(messages, final_messages)
-            if to_persist:
-                context.add_messages(convert_to_openai_messages(to_persist))
+            first_token = True
+            final_messages: list | None = None
+            async for event in self._graph.astream_events({"messages": messages}, version="v2"):
+                if event.get("event") == "on_chain_end":
+                    final_messages = _final_state(event, final_messages)
+                elif text := _spoken_text(event):
+                    if first_token:
+                        await self.stop_ttfb_metrics()
+                        first_token = False
+                    await self.push_frame(LLMTextFrame(text))
+
+            # Persist the tool-call exchange so the model sees it next turn.
+            if final_messages is not None:
+                to_persist = _tool_exchange(messages, final_messages)
+                if to_persist:
+                    context.add_messages(convert_to_openai_messages(to_persist))
+        finally:
+            await self.stop_processing_metrics()
+            await self.push_frame(LLMFullResponseEndFrame())

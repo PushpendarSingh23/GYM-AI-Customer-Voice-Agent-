@@ -50,7 +50,6 @@ src/gym_support/
 ├── server.py                # FastAPI text chat: GET / (page) + POST /chat
 ├── voice.py                 # Pipecat voice bot (same graph, spoken)
 ├── langgraph_llm_service.py # adapter: runs the graph as Pipecat's LLM stage
-├── processor.py             # OTel → LangSmith bridge (+ conversation audio)
 └── static/
     └── index.html           # the chat box
 ```
@@ -67,16 +66,12 @@ cp .env.example .env      # then fill in keys
 
 Set in `.env`:
 
-- `ANTHROPIC_API_KEY` — the default model is `anthropic:claude-sonnet-4-6`.
-  To use OpenAI instead, set `GYM_SUPPORT_MODEL=openai:gpt-5.5` and
-  `OPENAI_API_KEY` (and `uv add langchain-openai`).
+- `ANTHROPIC_API_KEY` — required; the agent runs on `anthropic:claude-sonnet-4-6`.
 - `OPENAI_API_KEY` — required for the **voice bot** (speech-to-text and
   text-to-speech run on OpenAI).
-- `LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY` — to see the handoffs in the
-  trace tree. `LANGSMITH_PROJECT` defaults to `pipecat-langgraph-example`.
-- For voice tracing, the `OTEL_EXPORTER_OTLP_*` vars + `LANGSMITH_TRACING_MODE=otel`
-  route Pipecat's spans (and the conversation audio) into the same LangSmith
-  project — see `.env.example`.
+- `LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY` — optional, to see the
+  handoffs in the trace tree. `LANGSMITH_PROJECT` defaults to
+  `pipecat-langgraph-example`.
 
 ## Run
 
@@ -112,12 +107,36 @@ transcript each turn, so interruptions never corrupt routing state.
 `voice.py` is the whole story — the only real change from the text app is that
 the LLM stage is `LangGraphLLMService` (our graph) instead of a stock model.
 
+## Evaluation
+
+```bash
+uv run gym-support-eval
+```
+
+Runs a handful of scripted conversations through the graph and checks:
+
+- **Latency** — time per test case (in the terminal table).
+- **Routing correctness** — did the graph land on the right specialist
+  (including a mid-conversation intent switch, exercising `transfer_to_triage`
+  and re-routing, not just a single handoff).
+- **Hallucination** — for credits/booking, the agent's reply is checked
+  against `mock_data` directly (the actual credit counts and class names),
+  not against hardcoded expected numbers — so it's really checking "did the
+  agent say what's true," not "did it match a fixture."
+
+It also runs one **exploratory** case with no pass/fail: a request outside
+all three specialists' scope (e.g. a refund policy question). Triage's
+current prompt has no "hand off to a human" option, so this documents a real
+gap rather than asserting behavior that doesn't exist — worth reading before
+extending the prompts.
+
+Requires `ANTHROPIC_API_KEY` — this calls the real model, not a mock.
+
 ## What you see in LangSmith
 
-**Text** — one trace per `/chat` turn. A handoff shows the triage agent calling a
-`transfer_to_*` tool, then the specialist node running and replying, so the
-routing decision and the specialist's work sit side by side in the tree.
-
-**Voice** — a `conversation` root span (grouped as a thread) with
-`turn → stt / llm / tts` underneath, the graph's `model`/`tool` nodes nested
-inside the `llm` span, and the full conversation **audio** attached to the root.
+With `LANGSMITH_TRACING=true`, LangChain/LangGraph trace themselves
+automatically — no extra wiring needed. One trace per turn (text or voice): a
+handoff shows the triage agent calling a `transfer_to_*` tool, then the
+specialist node running and replying, so the routing decision and the
+specialist's work sit side by side in the tree. Voice conversations are
+recorded to a local WAV file (path logged on disconnect) for manual review.
