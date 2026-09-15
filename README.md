@@ -1,142 +1,94 @@
-# pipecat-langgraph-example — Gym Support (multi-agent handoffs)
+# Gym AI Customer Voice Agent — Multi-Agent Support Bot
 
-A tiny customer-support agent for a fictional gym, built with
-**LangChain / LangGraph** multi-agent **handoffs**, traced to **LangSmith** — and
-served as both a **text chat** and a real-time **Pipecat voice bot** from the
-same graph.
+A multi-agent customer-support system for a fitness facility, built with **LangChain / LangGraph** multi-agent **handoffs**, traced with **LangSmith**, and served as both a **text chat** and a real-time **Pipecat voice bot** from the same state graph.
 
-It demonstrates the **"agents as graph nodes"** pattern (what we've been calling
-*Option A*): a **triage** front desk plus three specialists —
-**cancellation**, **credits**, and **booking** — each a distinct node in the
-graph. The customer stays "inside" a specialist across turns because the active
-agent is stored in state, not because execution pauses there.
+It demonstrates the **"agents as graph nodes"** pattern: a **triage** front desk plus three specialists — **cancellation**, **credits**, and **booking** — each a distinct node in the graph. The customer stays "inside" a specialist across turns because the active agent is stored in state.
 
-> The graph re-enters at `START` every turn and routes straight to the
-> `active_agent`. State remembers where the conversation is — the engine does
-> not freeze you inside a node.
+> The graph re-enters at `START` every turn and routes straight to the `active_agent`. State remembers where the conversation is — the engine does not freeze you inside a node.
 
 ```
 START ──(route_initial: active_agent or "triage")──► triage ──┐
-                                                              ├─► cancellation ─┐
-                                                              ├─► credits ──────┼─► (route_after_agent) ─► END
-                                                              └─► booking ──────┘            ▲
-                                                  specialists ── transfer_to_triage ─────────┘
+                                                               ├─► cancellation ─┐
+                                                               ├─► credits ──────┼─► (route_after_agent) ─► END
+                                                               └─► booking ──────┘            ▲
+                                                   specialists ── transfer_to_triage ─────────┘
 ```
 
-Each agent's handoff tools (`transfer_to_cancellation`, …) return a
-`Command(goto=..., graph=Command.PARENT)` that jumps to a sibling node and
-updates `active_agent`. This is the LangChain
-["Multiple agent subgraphs"](https://docs.langchain.com/oss/python/langchain/multi-agent/handoffs)
-handoff pattern.
+Each agent's handoff tools (`transfer_to_cancellation`, `transfer_to_credits`, `transfer_to_booking`, `transfer_to_triage`) return a `Command(goto=..., graph=Command.PARENT)` that jumps to a sibling node and updates `active_agent` using the LangChain / LangGraph multi-agent handoff pattern.
 
-## What it does
+---
 
-- **Cancel a membership** — give any ID; it's always "found" and cancelled.
-- **Check credits** — returns a mock breakdown (group class / personal training / guest passes).
-- **Book a class** — lists a mock schedule and spends one credit per booking.
+## 🌟 Key Capabilities
 
-All data is **mocked in-process** (`mock_data.py`). There is no database or
-external API: any membership ID works, and tool side effects mutate an
-in-memory dict that resets when the server restarts.
+- **Cancel a membership:** Give any ID; it is verified and processed in state.
+- **Check credits:** Returns a mock credit breakdown (group class / personal training / guest passes).
+- **Book a class:** Lists a schedule and spends one credit per booking.
+- **Real-Time Voice Bot:** Pipeline integrating Speech-to-Text (STT), Claude Sonnet LLM graph processing, and Text-to-Speech (TTS) with full barge-in and interruption handling via Pipecat.
 
-## Layout
+All data is mocked in-process (`mock_data.py`). There is no external database dependency: tool side effects mutate an in-memory dictionary that cleanly resets on server restart.
+
+---
+
+## 📁 Repository Layout
 
 ```
 src/gym_support/
-├── graph.py                 # the 4 agents wired as nodes + routing (the core)
-├── tools.py                 # business tools + transfer_to_* handoff tools
-├── prompts.py               # one system prompt per agent
-├── mock_data.py             # in-memory membership store
-├── server.py                # FastAPI text chat: GET / (page) + POST /chat
-├── voice.py                 # Pipecat voice bot (same graph, spoken)
-├── langgraph_llm_service.py # adapter: runs the graph as Pipecat's LLM stage
+├── graph.py                 # Core 4-agent nodes & handoff routing
+├── tools.py                 # Business logic tools + transfer_to_* handoffs
+├── prompts.py               # System prompts per agent
+├── mock_data.py             # In-memory membership data store
+├── server.py                # FastAPI text chat (GET / page + POST /chat)
+├── voice.py                 # Pipecat real-time voice bot
+├── langgraph_llm_service.py # Adapter running the graph as Pipecat LLM stage
+├── eval.py                  # Evaluation suite measuring latency & routing
 └── static/
-    └── index.html           # the chat box
+    └── index.html           # Interactive web chat interface
 ```
 
-## Setup
+---
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+## 🚀 Setup & Execution
+
+### Prerequisites
+Requires **Python 3.11+** and **[uv](https://docs.astral.sh/uv/)**.
 
 ```bash
-cd pipecat-langgraph-example
 uv sync
-cp .env.example .env      # then fill in keys
+cp .env.example .env
 ```
 
-Set in `.env`:
+### Environment Variables (`.env`)
+- `ANTHROPIC_API_KEY` — Required; agent model execution (`anthropic:claude-sonnet-4-6`).
+- `OPENAI_API_KEY` — Required for the **voice bot** (Speech-to-Text and Text-to-Speech).
+- `LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY` — Optional; enables full graph execution tracing in LangSmith.
 
-- `ANTHROPIC_API_KEY` — required; the agent runs on `anthropic:claude-sonnet-4-6`.
-- `OPENAI_API_KEY` — required for the **voice bot** (speech-to-text and
-  text-to-speech run on OpenAI).
-- `LANGSMITH_TRACING=true` + `LANGSMITH_API_KEY` — optional, to see the
-  handoffs in the trace tree. `LANGSMITH_PROJECT` defaults to
-  `pipecat-langgraph-example`.
+---
 
-## Run
+## 💻 Running the Applications
 
+### 1. Web Text Chat (FastAPI)
 ```bash
-uv run pipecat-langgraph-example
+uv run python -m gym_support.server
 ```
+Open `http://127.0.0.1:8000` to interact with the web chat interface. Try:
+- *"I want to cancel my membership"* → Watch the badge route to **cancellation**.
+- *"How many credits do I have left?"* → Routes to **credits**.
+- *"I'd like to book a class"* → Routes to **booking**.
 
-Open http://127.0.0.1:8000 and chat. Try:
-
-- "I want to cancel my membership" → watch the badge switch to **cancellation**,
-  then give any ID.
-- "How many credits do I have left?" → **credits**.
-- "I'd like to book a class" → **booking**, then "show me the classes"; it asks
-  for the date before booking.
-- Mid-conversation, switch intent ("actually, how many credits do I have?") —
-  the specialist hands you back to triage, which re-routes you.
-
-## Talk to it (voice)
-
-The same graph also runs as a real-time **Pipecat** voice bot — the agent
-doesn't change, it just gets ears and a mouth:
-
+### 2. Real-Time Voice Bot (Pipecat)
 ```bash
 uv run python -m gym_support.voice
 ```
+Open `http://localhost:7860`, click **Connect**, allow microphone access, and speak directly to the AI agent.
 
-Open the URL it prints (default http://localhost:7860), click **Connect**, allow
-the mic, and talk. The flow is STT → the LangGraph brain → TTS, with barge-in
-(interrupt the bot mid-sentence). Here the graph runs **statelessly**: Pipecat's
-context is the source of truth, and the active specialist is recovered from the
-transcript each turn, so interruptions never corrupt routing state.
-
-`voice.py` is the whole story — the only real change from the text app is that
-the LLM stage is `LangGraphLLMService` (our graph) instead of a stock model.
-
-## Evaluation
-
+### 3. Evaluation Suite
 ```bash
-uv run gym-support-eval
+uv run python -m gym_support.eval
 ```
+Evaluates latency, routing correctness across intent switches, and reply truthfulness against `mock_data`.
 
-Runs a handful of scripted conversations through the graph and checks:
+---
 
-- **Latency** — time per test case (in the terminal table).
-- **Routing correctness** — did the graph land on the right specialist
-  (including a mid-conversation intent switch, exercising `transfer_to_triage`
-  and re-routing, not just a single handoff).
-- **Hallucination** — for credits/booking, the agent's reply is checked
-  against `mock_data` directly (the actual credit counts and class names),
-  not against hardcoded expected numbers — so it's really checking "did the
-  agent say what's true," not "did it match a fixture."
+## 📜 License
 
-It also runs one **exploratory** case with no pass/fail: a request outside
-all three specialists' scope (e.g. a refund policy question). Triage's
-current prompt has no "hand off to a human" option, so this documents a real
-gap rather than asserting behavior that doesn't exist — worth reading before
-extending the prompts.
-
-Requires `ANTHROPIC_API_KEY` — this calls the real model, not a mock.
-
-## What you see in LangSmith
-
-With `LANGSMITH_TRACING=true`, LangChain/LangGraph trace themselves
-automatically — no extra wiring needed. One trace per turn (text or voice): a
-handoff shows the triage agent calling a `transfer_to_*` tool, then the
-specialist node running and replying, so the routing decision and the
-specialist's work sit side by side in the tree. Voice conversations are
-recorded to a local WAV file (path logged on disconnect) for manual review.
+This project is licensed under the MIT License.
